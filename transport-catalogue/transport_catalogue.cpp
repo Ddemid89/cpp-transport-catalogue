@@ -1,5 +1,6 @@
 #include "transport_catalogue.h"
 #include "geo.h"
+#include "domain.h"
 #include <string>
 #include <vector>
 #include <deque>
@@ -7,34 +8,53 @@
 #include <string_view>
 #include <cassert>
 #include <algorithm>
+#include <unordered_set>
 #include <set>
 
 using TC = TransportCatalogue;
 
-void TC::AddStop(const StopRequest& request) {
-    Stop& stop = GetStopRef(request.name);
+TC::TransportCatalogue() : stops_(data_.GetStopsArray()),
+                                                       buses_(data_.GetBusesArray()),
+                                                       stops_refs_(data_.GetStopsMap()),
+                                                       buses_refs_(data_.GetBusesMap()),
+                                                       stops_to_buses_(data_.GetStopsToBuses()){}
+
+TC::TransportCatalogue(domain::TransportData&& data) : data_(std::move(data)),
+                                                       stops_(data_.GetStopsArray()),
+                                                       buses_(data_.GetBusesArray()),
+                                                       stops_refs_(data_.GetStopsMap()),
+                                                       buses_refs_(data_.GetBusesMap()),
+                                                       stops_to_buses_(data_.GetStopsToBuses()){}
+
+void TC::AddStop(const domain::StopRequest& request) {
+    domain::Stop& stop = GetStopRef(request.name);
     stop.coordinates = request.coordinates;
     for (const auto& [name, distance] : request.neighbours) {
-        Stop& other_stop = GetStopRef(name);
+        domain::Stop& other_stop = GetStopRef(name);
         neighbours_distance_[{&stop, &other_stop}] = distance;
     }
 }
 
-void TC::AddBus(const BusRequest& request) {
-    Bus& bus = buses_.emplace_back();
+void TC::AddBus(const domain::BusRequest& request) {
+    domain::Bus& bus = buses_.emplace_back();
     bus.name = std::string(request.name);
     buses_refs_[bus.name] = &bus;
+    bus.is_roundtrip = request.is_roundtrip;
 
     bus.stops.reserve(request.stops.size());
 
+    std::unordered_set<std::string_view> unique_stops;
+
     for (const std::string_view stop : request.stops) {
-        Stop& stop_in_catalogue = GetStopRef(stop);
+        domain::Stop& stop_in_catalogue = GetStopRef(stop);
+        unique_stops.insert(stop_in_catalogue.name);
         bus.stops.push_back(&stop_in_catalogue);
         stops_to_buses_[stop_in_catalogue.name].insert(bus.name);
     }
+    bus.unique_stops = unique_stops.size();
 }
 
-TC::StopInfo TC::GetStopInfo(const std::string_view name) const {
+domain::StopInfo TC::GetStopInfo(const std::string_view name) const {
     static const std::set<std::string_view> empty_;
     bool was_found = stops_refs_.count(name) != 0;
     bool have_buses = stops_to_buses_.count(name) != 0;
@@ -49,8 +69,8 @@ TC::StopInfo TC::GetStopInfo(const std::string_view name) const {
     }
 }
 
-TC::BusInfo TC::GetBusInfo(const std::string_view name) const {
-    BusInfo result;
+domain::BusInfo TC::GetBusInfo(const std::string_view name) const {
+    domain::BusInfo result;
     result.name = name;
 
     auto it = buses_refs_.find(name);
@@ -59,30 +79,32 @@ TC::BusInfo TC::GetBusInfo(const std::string_view name) const {
         return result;
     }
 
-    Bus& bus = *(*it).second;
+    domain::Bus& bus = *(*it).second;
 
-    for (const Stop* stop : bus.stops) {
+    for (const domain::Stop* stop : bus.stops) {
         result.stops.push_back((*stop).name);
     }
 
     result.length = ComputeRouteLength(name);
 
+    result.unique_stops = bus.unique_stops;
+
     return result;
 }
 
-using StopPtrPair = std::pair<const TC::Stop*,const TC::Stop*>;
+using StopPtrPair = std::pair<const domain::Stop*,const domain::Stop*>;
 
-TC::Stop& TC::GetStopRef(std::string_view name) {
+domain::Stop& TC::GetStopRef(std::string_view name) {
     auto it = stops_refs_.find(name);
     if (it != stops_refs_.end()) {
         return *(*it).second;
     }
-    Stop& stop = stops_.emplace_back(Stop{std::string(name), {}});
+    domain::Stop& stop = stops_.emplace_back(domain::Stop{std::string(name), {}});
     stops_refs_[stop.name] = &stop;
     return stop;
 }
 
-int TC::GetRealDistance(const Stop& a, const Stop& b) const {
+int TC::GetRealDistance(const domain::Stop& a, const domain::Stop& b) const {
     auto it  = neighbours_distance_.find({&a, &b});
     auto end = neighbours_distance_.end();
     if (it != end) {
@@ -96,19 +118,19 @@ int TC::GetRealDistance(const Stop& a, const Stop& b) const {
     return -1;
 }
 
-TC::DistanceInfo TC::ComputeRouteLength(std::string_view name) const {
+domain::DistanceInfo TC::ComputeRouteLength(std::string_view name) const {
     auto it = lengths_data_.find(name);
     if (it != lengths_data_.end()) {
         return (*it).second;
     }
 
-    Bus& bus = *buses_refs_.at(name);
-    std::vector<Stop*>& stops = bus.stops;
-    DistanceInfo result;
+    domain::Bus& bus = *buses_refs_.at(name);
+    std::vector<domain::Stop*>& stops = bus.stops;
+    domain::DistanceInfo result;
 
     for (size_t i = 1; i < stops.size(); ++i) {
-        Stop& cur_stop = *stops[i];
-        Stop& pre_stop = *stops[i - 1];
+        domain::Stop& cur_stop = *stops[i];
+        domain::Stop& pre_stop = *stops[i - 1];
         result.geo_length  += ComputeDistance(pre_stop.coordinates, cur_stop.coordinates);
         result.real_length += GetRealDistance(pre_stop, cur_stop);
     }

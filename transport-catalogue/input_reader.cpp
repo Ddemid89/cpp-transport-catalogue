@@ -2,6 +2,8 @@
 #include <iostream>
 #include "transport_catalogue.h"
 #include <vector>
+#include "domain.h"
+#include "request_handler.h"
 
 namespace stream_input {
 namespace detail {
@@ -37,9 +39,9 @@ std::string_view GetNextWord(std::string_view& text, char separator) {
     return result;
 }
 
-TransportCatalogue::StopRequest ParseStopRequest(std::string_view request) {
+domain::StopRequest ParseStopRequest(std::string_view request) {
     assert(!request.empty());
-    TransportCatalogue::StopRequest result;
+    domain::StopRequest result;
 
     std::string_view name = GetNextWord(request, ':');
     name = RemoveFirstWord(name);
@@ -60,8 +62,8 @@ TransportCatalogue::StopRequest ParseStopRequest(std::string_view request) {
     return result;
 }
 
-TransportCatalogue::BusRequest ParseBusRequest(std::string_view request) {
-    TransportCatalogue::BusRequest result;
+domain::BusRequest ParseBusRequest(std::string_view request) {
+    domain::BusRequest result;
 
     result.name = RemoveFirstWord(GetNextWord(request, ':'));
 
@@ -82,7 +84,7 @@ TransportCatalogue::BusRequest ParseBusRequest(std::string_view request) {
 }
 }//namespace detail
 
-void GetDataFromIStream(TransportCatalogue& catalogue, std::istream& in) { //default in = std::cin (in .h file)
+void GetDataFromIStream(request_handler::RequstHandler& catalogue, std::istream& in) { //default in = std::cin (in .h file)
     int request_count;
     in >> request_count;
     std::string request;

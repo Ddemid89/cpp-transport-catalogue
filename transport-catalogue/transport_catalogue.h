@@ -8,74 +8,50 @@
 #include <string_view>
 #include <cassert>
 #include <set>
+#include <variant>
+#include "domain.h"
 
 class TransportCatalogue {
 public:
-    struct DistanceInfo {
-        double geo_length  = 0;
-        double real_length = 0;
-        double curvature   = 0;
-    };
+    TransportCatalogue();
 
-    struct Stop {
-        std::string name;
-        Coordinates coordinates;
-    };
+    TransportCatalogue(domain::TransportData&& data);
 
-    struct Bus {
-        std::string name;
-        std::vector<Stop*> stops;
-    };
+    TransportCatalogue(const TransportCatalogue&) = delete;
 
-    struct StopRequest {
-        std::string_view name;
-        Coordinates coordinates;
-        std::unordered_map<std::string_view, int> neighbours;
-    };
+    TransportCatalogue& operator=(const TransportCatalogue&) = delete;
 
-    struct BusRequest {
-       std::string_view name;
-       std::vector<std::string_view> stops;
-    };
+    void AddStop(const domain::StopRequest& request);
 
-    struct StopInfo {
-        std::string_view name;
-        const std::set<std::string_view>& buses;
-        bool was_found;
-    };
+    void AddBus(const domain::BusRequest& request);
 
-    struct BusInfo {
-        std::string_view name;
-        std::vector<std::string_view> stops;
-        DistanceInfo length;
-    };
+    domain::StopInfo GetStopInfo(const std::string_view name) const;
 
-    void AddStop(const StopRequest& request);
+    domain::BusInfo GetBusInfo(const std::string_view name) const;
 
-    void AddBus(const BusRequest& request);
+    const domain::TransportData& GetData() const {
+        return data_;
+    }
 
-    StopInfo GetStopInfo(const std::string_view name) const;
-
-    BusInfo GetBusInfo(const std::string_view name) const;
 //Debug========================================================================
-    size_t GetStopsSize() {
+    size_t GetStopsSize() const {
         assert(stops_.size() == stops_refs_.size());
         return stops_.size();
     }
 
-    size_t GetBusesSize() {
+    size_t GetBusesSize() const {
         assert(buses_.size() == buses_refs_.size());
         return buses_.size();
     }
 //Debug========================================================================
 private:
-    using StopPtrPair = std::pair<const Stop*,const Stop*>;
+    using StopPtrPair = std::pair<const domain::Stop*,const domain::Stop*>;
 
-    Stop& GetStopRef(std::string_view name);
+    domain::Stop& GetStopRef(std::string_view name);
 
-    int GetRealDistance(const Stop& a, const Stop& b) const;
+    int GetRealDistance(const domain::Stop& a, const domain::Stop& b) const;
 
-    DistanceInfo ComputeRouteLength(std::string_view name) const;
+    domain::DistanceInfo ComputeRouteLength(std::string_view name) const;
 
     class StopsPairHasher {
     public:
@@ -86,11 +62,13 @@ private:
         std::hash<const void*> hasher;
     };
 
-    std::deque<Stop> stops_;
-    std::deque<Bus> buses_;
-    std::unordered_map<std::string_view, Stop*> stops_refs_;
-    std::unordered_map<std::string_view, Bus*> buses_refs_;
-    std::unordered_map<std::string_view, std::set<std::string_view>> stops_to_buses_;
-    mutable std::unordered_map<std::string_view, DistanceInfo> lengths_data_;
+    domain::TransportData data_;
+    std::deque<domain::Stop>& stops_;
+    std::deque<domain::Bus>& buses_;
+    std::unordered_map<std::string_view, domain::Stop*>& stops_refs_;
+    std::unordered_map<std::string_view, domain::Bus*>& buses_refs_;
+    std::unordered_map<std::string_view, std::set<std::string_view>>& stops_to_buses_;
+
+    mutable std::unordered_map<std::string_view, domain::DistanceInfo> lengths_data_;
     std::unordered_map<StopPtrPair, int, StopsPairHasher> neighbours_distance_;
 };
