@@ -12,14 +12,11 @@ using namespace std;
 int main() {
     //tests::testAll();
     TransportCatalogue tc;
-    request_handler::RequstHandler handler(tc);
+    stream_input_json::JSONReader reader(std::cin);
+    stream_input_json::JSONPrinter stat_printer(std::cout);
+    map_renderer::MapRendererJSON map_renderer;
 
-    stream_input_json::GetJSONDataFromIStream(handler);
+    request_handler::RequestHandler handler(tc, reader, stat_printer, map_renderer);
 
-    //stream_input_json::GetJSONDataFromIStreamAndRenderMap();
-    //TransportCatalogue catalogue;
-    //stream_input_json::GetJSONDataFromIStream(catalogue);
-    //stream_input::GetDataFromIStream(catalogue);
-    //stream_stats::GetRequestsFromIStream(catalogue);
     return 0;
 }

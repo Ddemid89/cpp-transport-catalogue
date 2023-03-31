@@ -76,28 +76,8 @@ private:
     double zoom_coeff_ = 0;
 };
 
-SphereProjector GetProjector(const std::vector<domain::Stop*>& stops,
-                             double width, double height, double padding) {
-    std::vector<geo::Coordinates> coordinates(stops.size());
-    std::transform(stops.begin(), stops.end(), coordinates.begin(),
-               [](const domain::Stop* stop){
-                    return stop->coordinates;
-               });
-    return SphereProjector(coordinates.begin(), coordinates.end(), width, height, padding);
-}
-
-std::map<std::string_view, svg::Point> GetStopPoints (const std::vector<domain::Stop*> stops,
-                           double width, double height, double padding) {
-
-    detail::SphereProjector projector = detail::GetProjector(stops, width,
-                                                             height, padding);
-    std::map<std::string_view, svg::Point> stops_points;
-
-    std::for_each(stops.begin(), stops.end(),
-                  [&projector, &stops_points](const domain::Stop* stop){
-                        stops_points[stop->name] = projector(stop->coordinates);
-                  });
-    return stops_points;
+svg::Point ConvertPointToSvg(domain::Point point) {
+    return {point.x, point.y};
 }
 
 svg::Color ConvertOneColor(const domain::Color& color) {
@@ -114,191 +94,174 @@ svg::Color ConvertOneColor(const domain::Color& color) {
     return result;
 }
 
-std::vector<svg::Color> ConvertColors(const std::vector<domain::Color>& pallete) {
-    std::vector<svg::Color> result;
-    result.reserve(pallete.size());
-    for (const domain::Color& color : pallete) {
-        result.push_back(ConvertOneColor(color));
-    }
-    return result;
-}
-
-std::vector<domain::Stop*> GetUsedStops(const domain::TransportData& data) {
-    const std::unordered_map<std::string_view, std::set<std::string_view>>& stops_to_buses
-        = data.GetStopsToBuses();
-    const std::unordered_map<std::string_view, domain::Stop*>& all_stops = data.GetStopsMap();
-
-    std::vector<domain::Stop*> stops(stops_to_buses.size());
-
-    std::transform(stops_to_buses.begin(), stops_to_buses.end(), stops.begin(),
-        [&all_stops](const std::pair<const std::string_view, std::set<std::string_view>>& stop) {
-            return all_stops.at(stop.first);
-        });
-    return stops;
-}
-
-void DrawRoute (svg::Document& doc, const domain::Bus& bus,
-                const std::map<std::string_view, svg::Point>& stops_points,
-                double line_width, svg::Color color,
-                svg::StrokeLineCap line_cap = svg::StrokeLineCap::ROUND,
-                svg::StrokeLineJoin line_join = svg::StrokeLineJoin::ROUND,
-                svg::Color fill_color = svg::Color{}) {
-    svg::Polyline line;
-    line.SetStrokeWidth(line_width);
-    line.SetStrokeColor(color);
-    line.SetStrokeLineJoin(line_join);
-    line.SetStrokeLineCap(line_cap);
-    line.SetFillColor(fill_color);
-
-    for (const domain::Stop* stop : bus.stops) {
-        std::string_view name = stop->name;
-        line.AddPoint(stops_points.at(name));
-    }
-
-    doc.Add(line);
-}
-
-void FillBusTextSettings(svg::Text& text, const RenderSettings& settings,
-                         std::string_view name, svg::Point point) {
-    svg::Point svg_point{point.x, point.y};
-    svg::Point svg_offset{settings.bus_label_offset.x, settings.bus_label_offset.y};
-
-    text.SetPosition(svg_point);
-    text.SetOffset(svg_offset);
-    text.SetFontSize(settings.bus_label_font_size);
-    text.SetFontFamily("Verdana");
-    text.SetFontWeight("bold");
-    text.SetData(std::string(name));
-}
-
-void DrawOneRouteName (std::vector<std::unique_ptr<svg::Object>>& result, std::string_view name,
-                       svg::Point stop_point, const RenderSettings& settings,
-                       const svg::Color& color) {
-    svg::Text underlayer;
-    svg::Text bus_name;
-    FillBusTextSettings(underlayer, settings, name, stop_point);
-    FillBusTextSettings(bus_name, settings, name, stop_point);
-
-    underlayer.SetFillColor(ConvertOneColor(settings.underlayer_color));
-    underlayer.SetStrokeColor(ConvertOneColor(settings.underlayer_color));
-    underlayer.SetStrokeWidth(settings.underlayer_width);
-    underlayer.SetStrokeLineCap(svg::StrokeLineCap::ROUND);
-    underlayer.SetStrokeLineJoin(svg::StrokeLineJoin::ROUND);
-
-    bus_name.SetFillColor(color);
-
-    result.push_back(std::move(std::make_unique<svg::Text>(std::move(underlayer))));
-    result.push_back(std::move(std::make_unique<svg::Text>(std::move(bus_name))));
-}
-
-void DrawRouteNames (std::vector<std::unique_ptr<svg::Object>>& result, const domain::Bus& bus,
-                    const std::map<std::string_view, svg::Point>& stops_points,
-                    const svg::Color& color, const RenderSettings& settings) {
-
-    svg::Point first_stop = stops_points.at(bus.stops.at(0)->name);
-
-    DrawOneRouteName(result, bus.name, first_stop, settings, color);
-
-    if (!bus.is_roundtrip) {
-        size_t last_stop_index = (bus.stops.size() + 1) / 2 - 1;
-
-        if (bus.stops.at(0) != bus.stops.at(last_stop_index)) {
-            svg::Point last_stop = stops_points.at(bus.stops.at(last_stop_index)->name);
-            DrawOneRouteName(result, bus.name, last_stop, settings, color);
-        }
-    }
-}
-
-void FillStopTextSettings (svg::Text& text, const RenderSettings& settings,
-                           svg::Point point, std::string_view name) {
-    svg::Point svg_offset(settings.stop_label_offset.x, settings.stop_label_offset.y);
-    text.SetPosition(point);
-    text.SetOffset(svg_offset);
-    text.SetFontSize(settings.stop_label_font_size);
-    text.SetFontFamily("Verdana");
-    text.SetData(std::string(name));
-}
-
-void DrawStops (svg::Document& doc, std::vector<std::unique_ptr<svg::Object>>& result,
-                std::string_view name, const svg::Point& stop_point, const RenderSettings& settings) {
-
-    svg::Circle point;
-    point.SetCenter(stop_point);
-    point.SetRadius(settings.stop_radius);
-    point.SetFillColor("white");
-    doc.Add(point);
-
-    svg::Text underlayer;
-
-    FillStopTextSettings(underlayer, settings, stop_point, name);
-    underlayer.SetFillColor(ConvertOneColor(settings.underlayer_color));
-    underlayer.SetStrokeColor(ConvertOneColor(settings.underlayer_color));
-    underlayer.SetStrokeWidth(settings.underlayer_width);
-    underlayer.SetStrokeLineCap(svg::StrokeLineCap::ROUND);
-    underlayer.SetStrokeLineJoin(svg::StrokeLineJoin::ROUND);
-
-    svg::Text stop_name;
-    FillStopTextSettings(stop_name, settings, stop_point, name);
-    stop_name.SetFillColor("black");
-
-    result.push_back(std::move(std::make_unique<svg::Text>(std::move(underlayer))));
-    result.push_back(std::move(std::make_unique<svg::Text>(std::move(stop_name))));
-}
-
 } //namespace detail
 
 
+RenderSettings MapRendererJSON::ConvertRenderSettings(const request_handler::RenderSettings& settings) {
+    RenderSettings result;
+    result.bus_label_font_size = settings.bus_label_font_size;
+    result.bus_label_offset    = detail::ConvertPointToSvg(settings.bus_label_offset);
 
-void RenderMap(const domain::TransportData& data,
-               const RenderSettings settings, std::ostream& out){
+    for (const domain::Color& color : settings.color_palette) {
+        result.color_palette.push_back(detail::ConvertOneColor(color));
+    }
 
-    const std::vector<domain::Stop*> used_stops = detail::GetUsedStops(data);
+    result.height     = settings.height;
+    result.line_width = settings.line_width;
+    result.padding    = settings.padding;
 
-    const std::map<std::string_view, svg::Point> stops_points
-        = detail::GetStopPoints(used_stops, settings.width, settings.height, settings.padding);
+    result.stop_label_font_size = settings.stop_label_font_size;
+    result.stop_label_offset    = detail::ConvertPointToSvg(settings.stop_label_offset);
 
-    const std::unordered_map<std::string_view, domain::Bus*>& buses
-        = data.GetBusesMap();
+    result.stop_radius      = settings.stop_radius;
+    result.underlayer_color = detail::ConvertOneColor(settings.underlayer_color);
+    result.underlayer_width = settings.underlayer_width;
+    result.width            = settings.width;
 
-    std::map<std::string_view, domain::Bus*> sorted_buses(buses.begin(), buses.end());
+    return result;
+}
 
+std::map<std::string_view, svg::Point>
+MapRendererJSON::GetStopPoints
+(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops){
+    std::map<std::string_view, svg::Point> result;
+    std::vector<geo::Coordinates> coordinates(stops.size());
+    RenderSettings& settings = settings_.value();
+
+    std::transform(stops.begin(), stops.end(), coordinates.begin(),
+                   [](const std::pair<const std::string_view, geo::Coordinates>& stop){
+                        return stop.second;
+                   });
+    detail::SphereProjector projector(coordinates.begin(), coordinates.end(),
+                                      settings.width, settings.height, settings.padding);
+
+    std::for_each(stops.begin(), stops.end(),
+                   [&projector, &result](const std::pair<const std::string_view, geo::Coordinates>& stop){
+                        result[stop.first] = projector(stop.second);
+                   });
+
+    return result;
+}
+
+void MapRendererJSON::RenderStops() {
+    RenderSettings& settings = settings_.value();
+    svg::Circle stop_point;
+    stop_point.SetRadius(settings.stop_radius);
+    stop_point.SetFillColor("white");
+
+    std::vector<svg::Text> stop_labels;
+
+    svg::Text underlayer;
+    svg::Text label;
+
+    underlayer.SetOffset(settings.stop_label_offset)
+              .SetFontSize(settings.stop_label_font_size)
+              .SetFontFamily("Verdana")
+
+              .SetFillColor(settings.underlayer_color)
+              .SetStrokeColor(settings.underlayer_color)
+              .SetStrokeWidth(settings.underlayer_width)
+              .SetStrokeLineCap(svg::StrokeLineCap::ROUND)
+              .SetStrokeLineJoin(svg::StrokeLineJoin::ROUND);
+
+    label.SetOffset(settings.stop_label_offset)
+         .SetFontSize(settings.stop_label_font_size)
+         .SetFontFamily("Verdana")
+         .SetFillColor("black");
+
+    for (const std::pair<const std::string_view, svg::Point> stop : stops_points_) {
+        stop_point.SetCenter(stop.second);
+        doc_.Add(stop_point);
+
+        underlayer.SetData(std::string(stop.first));
+        label.SetData(std::string(stop.first));
+        underlayer.SetPosition(stop.second);
+        label.SetPosition(stop.second);
+        stop_labels.push_back(underlayer);
+        stop_labels.push_back(label);
+    }
+
+    for (svg::Text stop_label : stop_labels) {
+        doc_.Add(stop_label);
+    }
+}
+
+void MapRendererJSON::SetBusLabelSettings(svg::Text& label, bool underlayer){
+    RenderSettings& settings = settings_.value();
+    label.SetOffset(settings.bus_label_offset)
+         .SetFontSize(settings.bus_label_font_size)
+         .SetFontFamily("Verdana")
+         .SetFontWeight("bold");
+    if (underlayer) {
+        label.SetFillColor(settings.underlayer_color)
+             .SetStrokeColor(settings.underlayer_color)
+             .SetStrokeWidth(settings.underlayer_width)
+             .SetStrokeLineCap(svg::StrokeLineCap::ROUND)
+             .SetStrokeLineJoin(svg::StrokeLineJoin::ROUND);
+    }
+}
+
+void MapRendererJSON::SetBusLineSettings(svg::Polyline& line, const svg::Color& color){
+    const RenderSettings& settings = settings_.value();
+
+    line.SetFillColor("none")
+        .SetStrokeColor(color)
+        .SetStrokeLineCap(svg::StrokeLineCap::ROUND)
+        .SetStrokeLineJoin(svg::StrokeLineJoin::ROUND)
+        .SetStrokeWidth(settings.line_width);
+}
+
+void MapRendererJSON::RenderBuses(const std::set<domain::BusForRender>& buses) {
     int current_color_index = 0;
-    const int colors_count = settings.color_palette.size();
+    const std::vector<svg::Color>& palette = settings_.value().color_palette;
+    const int colors_count = palette.size();
 
-    std::vector<svg::Color> palette = detail::ConvertColors(settings.color_palette);
+    std::vector<svg::Text> bus_labels;
+    svg::Text underlayer;
+    svg::Text label;
 
-    svg::Document document;
+    SetBusLabelSettings(underlayer, true);
+    SetBusLabelSettings(label, false);
 
-    std::vector<std::unique_ptr<svg::Object>> bus_labels;
+    for (const domain::BusForRender& bus : buses) {
+        svg::Color current_color = palette[current_color_index % colors_count];
+        current_color_index++;
 
-    for (const std::pair<const std::string_view, domain::Bus*>& bus : sorted_buses) {
-        if (!bus.second->stops.empty()) {
-            svg::Color current_color = palette[current_color_index % colors_count];
-            current_color_index++;
-            detail::DrawRoute(document, *bus.second, stops_points,
-                              settings.line_width, current_color);
-            detail::DrawRouteNames(bus_labels, *bus.second, stops_points,
-                                   current_color, settings);
+        svg::Polyline line;
+        SetBusLineSettings(line, current_color);
+
+        for(std::string_view stop : bus.stops) {
+            line.AddPoint(stops_points_.at(stop));
+        }
+
+        doc_.Add(line);
+
+        svg::Point point = stops_points_.at(bus.stops[0]);
+
+        underlayer.SetData(std::string(bus.name));
+        label.SetData(std::string(bus.name));
+        label.SetFillColor(current_color);
+        underlayer.SetPosition(point);
+        label.SetPosition(point);
+
+        bus_labels.push_back(underlayer);
+        bus_labels.push_back(label);
+
+        if (!bus.is_roundtrip) {
+            int last_stop_index = (bus.stops.size() - 1) / 2;
+            if (bus.stops[0] != bus.stops[last_stop_index]) {
+                point = stops_points_.at(bus.stops[last_stop_index]);
+                underlayer.SetPosition(point);
+                label.SetPosition(point);
+                bus_labels.push_back(underlayer);
+                bus_labels.push_back(label);
+            }
         }
     }
 
-    for (std::unique_ptr<svg::Object>& obj : bus_labels) {
-        document.AddPtr(std::move(obj));
+    for (svg::Text bus_label : bus_labels) {
+        doc_.Add(bus_label);
     }
-
-    bus_labels.clear();
-
-    std::vector<std::unique_ptr<svg::Object>> stop_labels;
-
-    for (const std::pair<const std::string_view, svg::Point>& point : stops_points) {
-        detail::DrawStops(document, stop_labels, point.first, point.second, settings);
-    }
-
-    for (std::unique_ptr<svg::Object>& obj : stop_labels) {
-        document.AddPtr(std::move(obj));
-    }
-
-    document.Render(out);
 }
 
 } //namespace map_renderer

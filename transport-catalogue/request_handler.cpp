@@ -7,55 +7,82 @@
 #include <optional>
 #include "map_renderer.h"
 #include "transport_catalogue.h"
+#include "svg.h"
+#include <algorithm>
 
 namespace request_handler {
 
-using RH = RequstHandler;
-
-RH::RequstHandler(TransportCatalogue& catalogue) : catalogue_(catalogue) {}
-
-void RH::AddBus(const domain::BusRequest& request) {
-    catalogue_.AddBus(request);
+void RequestHandler::Add(AddingStopRequest& request) {
+    domain::StopRequest result{request.name, {request.latitude, request.longitude}, std::move(request.neighbours)};
+    catalogue_.AddStop(result);
 }
 
-void RH::AddBus(std::string_view name, std::vector<std::string_view>& stops, bool is_roundtrip) {
-    domain::BusRequest request{name, stops, is_roundtrip};
-    catalogue_.AddBus(request);
+void RequestHandler::Add(AddingBusRequest& request) {
+    domain::BusRequest result{request.name, std::move(request.stops), request.is_roundtrip};
+    catalogue_.AddBus(result);
 }
 
-void RH::AddStop (const domain::StopRequest& request) {
-    catalogue_.AddStop(request);
+void RequestHandler::Process(StopInfoRequest& request) {
+    StopInfo info{catalogue_.GetStopInfo(request.name), request.id};
+    printer_.Print(info);
 }
 
-void RH::AddStop(std::string_view name, double latitude, double longitude,
-             std::unordered_map<std::string_view, int>& neighbours){
-    domain::StopRequest request{name, {latitude, longitude}, neighbours};
-    catalogue_.AddStop(request);
+void RequestHandler::Process(BusInfoRequest& request) {
+    BusInfo info{catalogue_.GetBusInfo(request.name), request.id};
+    printer_.Print(info);
 }
 
-void RH::SetRenderSettings(map_renderer::RenderSettings settings) {
-    render_settings_ = std::move(settings);
-}
+void RequestHandler::Process(MapInfoRequest& request) {
+    if (render_settings_) {
+        std::ostringstream out;
+        map_renderer_.SetRenderSettings(render_settings_.value());
 
-domain::BusInfo RH::GetBusInfo(std::string_view name) const {
-    return catalogue_.GetBusInfo(name);
-}
+        std::vector<std::pair<std::string_view, geo::Coordinates>> used_stops = catalogue_.GetStopsUsed();
+        std::set<domain::BusForRender> buses = catalogue_.GetBusesForRender();
 
-domain::StopInfo RH::GetStopInfo(std::string_view name) const {
-    return catalogue_.GetStopInfo(name);
-}
+        MapData data(used_stops, buses);
+        map_renderer_.RenderMap(data, out);
 
-std::string RH::GetMap() const {
-    if (!render_settings_) {
-        throw std::runtime_error("No render settings!");
+        MapInfo map_info;
+        map_info.id = request.id;
+        map_info.map_str = out.str();
+
+        printer_.Print(map_info);
     } else {
-        std::stringstream out;
-        map_renderer::RenderMap(catalogue_.GetData(), render_settings_.value(), out);
-        return out.str();
+        throw std::runtime_error("No render setting!");
     }
 }
 
-const domain::TransportData& RH::GetData() const {
-    return catalogue_.GetData();
+RequestHandler::RequestHandler(TransportCatalogue& catalogue,
+                               RequestReader& reader,
+                               RequestPrinter& printer,
+                               MapRenderer& map_renderer) : catalogue_(catalogue),
+                                                            printer_(printer),
+                                                            map_renderer_(map_renderer) {
+    reader.Read();
+
+    render_settings_ = reader.GetSettings();
+
+    std::vector<std::unique_ptr<BaseRequest>>& requests = reader.GetBaseRequests();
+    for (std::unique_ptr<BaseRequest>& request : requests) {
+        request.get()->AddMeTo(*this);
+    }
+
+    std::vector<std::unique_ptr<StatRequest>>& stat_requests = reader.GetStatRequests();
+    for (std::unique_ptr<StatRequest>& request : stat_requests) {
+        request.get()->ProcessMeBy(*this);
+    }
+
+    printer_.RenderAll();
+    printer_.Clear();
 }
+
+void RequestHandler::AddBus(const domain::BusRequest& request) {
+    catalogue_.AddBus(request);
+}
+
+void RequestHandler::AddStop (const domain::StopRequest& request) {
+    catalogue_.AddStop(request);
+}
+
 } //namespace request_handler

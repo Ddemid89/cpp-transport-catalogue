@@ -13,9 +13,7 @@
 
 class TransportCatalogue {
 public:
-    TransportCatalogue();
-
-    TransportCatalogue(domain::TransportData&& data);
+    TransportCatalogue() = default;
 
     TransportCatalogue(const TransportCatalogue&) = delete;
 
@@ -29,9 +27,9 @@ public:
 
     domain::BusInfo GetBusInfo(const std::string_view name) const;
 
-    const domain::TransportData& GetData() const {
-        return data_;
-    }
+    std::set<domain::BusForRender> GetBusesForRender() const;
+
+    std::vector<std::pair<std::string_view, geo::Coordinates>> GetStopsUsed() const;
 
 //Debug========================================================================
     size_t GetStopsSize() const {
@@ -62,13 +60,11 @@ private:
         std::hash<const void*> hasher;
     };
 
-    domain::TransportData data_;
-    std::deque<domain::Stop>& stops_;
-    std::deque<domain::Bus>& buses_;
-    std::unordered_map<std::string_view, domain::Stop*>& stops_refs_;
-    std::unordered_map<std::string_view, domain::Bus*>& buses_refs_;
-    std::unordered_map<std::string_view, std::set<std::string_view>>& stops_to_buses_;
-
+    std::deque<domain::Stop> stops_;
+    std::deque<domain::Bus> buses_;
+    std::unordered_map<std::string_view, domain::Stop*> stops_refs_;
+    std::unordered_map<std::string_view, domain::Bus*> buses_refs_;
+    std::unordered_map<std::string_view, std::set<std::string_view>> stops_to_buses_;
     mutable std::unordered_map<std::string_view, domain::DistanceInfo> lengths_data_;
     std::unordered_map<StopPtrPair, int, StopsPairHasher> neighbours_distance_;
 };

@@ -7,8 +7,53 @@
 #include "map_renderer.h"
 #include "request_handler.h"
 
-namespace stream_input_json{
+namespace stream_input_json {
 namespace detail {
+
+request_handler::AddingBusRequest GetBusRequest(const json::Dict& bus_request) {
+    request_handler::AddingBusRequest result;
+    result.name = bus_request.at("name").AsString();
+    result.is_roundtrip = bus_request.at("is_roundtrip").AsBool();
+
+    const json::Array& stops = bus_request.at("stops").AsArray();
+    for (const json::Node& stop : stops) {
+        result.stops.push_back(stop.AsString());
+    }
+    return result;
+}
+
+request_handler::AddingStopRequest GetStopRequest(const json::Dict& stop_request) {
+    request_handler::AddingStopRequest result;
+    result.name = stop_request.at("name").AsString();
+    result.latitude = stop_request.at("latitude").AsDouble();
+    result.longitude = stop_request.at("longitude").AsDouble();
+
+    const json::Dict& neighbours = stop_request.at("road_distances").AsMap();
+    for (const std::pair<const std::string, json::Node>& neighbour : neighbours) {
+        result.neighbours[neighbour.first] = neighbour.second.AsInt();
+    }
+    return result;
+}
+
+request_handler::BusInfoRequest GetBusStatRequest(const json::Dict& request) {
+    request_handler::BusInfoRequest result;
+    result.id = request.at("id").AsInt();
+    result.name = request.at("name").AsString();
+    return result;
+}
+
+request_handler::StopInfoRequest GetStopStatRequest(const json::Dict& request) {
+    request_handler::StopInfoRequest result;
+    result.id = request.at("id").AsInt();
+    result.name = request.at("name").AsString();
+    return result;
+}
+
+request_handler::MapInfoRequest GetMapStatRequest(const json::Dict& request) {
+    request_handler::MapInfoRequest result;
+    result.id = request.at("id").AsInt();
+    return result;
+}
 
 domain::Color GetColor(const json::Node& color) {
     domain::Color result;
@@ -33,14 +78,34 @@ domain::Color GetColor(const json::Node& color) {
     return result;
 }
 
-domain::Point GetPoint(const json::Array point) {
+domain::Point GetPoint(const json::Array& point) {
     double x = point[0].AsDouble();
     double y = point[1].AsDouble();
     return {x, y};
 }
+} // namespace detail
 
-map_renderer::RenderSettings GetRenderSettings(const json::Dict& request) {
-    map_renderer::RenderSettings result;
+
+void JSONReader::GetOneBaseRequest(const json::Node& request) {
+    const json::Dict& req_dict = request.AsMap();
+    std::string_view type = req_dict.at("type").AsString();
+    if (type == "Bus") {
+        AddBaseRequest(detail::GetBusRequest(req_dict));
+    } else if (type == "Stop") {
+        AddBaseRequest(detail::GetStopRequest(req_dict));
+    } else {
+        throw std::logic_error("json_reader::ProcessOneStat: only \"Bus\" and \"Stop\" requests supported!");
+    }
+}
+
+void JSONReader::GetBaseRequests(const json::Array& requests) {
+    for (const json::Node& request : requests) {
+        GetOneBaseRequest(request);
+    }
+}
+
+request_handler::RenderSettings JSONReader::GetRenderSettings(const json::Dict& request) {
+    request_handler::RenderSettings result;
 
     result.bus_label_font_size = request.at("bus_label_font_size").AsInt();
     result.stop_label_font_size = request.at("stop_label_font_size").AsInt();
@@ -52,89 +117,43 @@ map_renderer::RenderSettings GetRenderSettings(const json::Dict& request) {
     result.underlayer_width = request.at("underlayer_width").AsDouble();
     result.width = request.at("width").AsDouble();
 
-    result.bus_label_offset = GetPoint(request.at("bus_label_offset").AsArray());
-    result.stop_label_offset = GetPoint(request.at("stop_label_offset").AsArray());
+    result.bus_label_offset = detail::GetPoint(request.at("bus_label_offset").AsArray());
+    result.stop_label_offset = detail::GetPoint(request.at("stop_label_offset").AsArray());
 
-    result.underlayer_color = GetColor(request.at("underlayer_color"));
+    result.underlayer_color = detail::GetColor(request.at("underlayer_color"));
 
     const json::Array palette = request.at("color_palette").AsArray();
     for (const json::Node& color : palette) {
-        result.color_palette.push_back(GetColor(color));
+        result.color_palette.push_back(detail::GetColor(color));
     }
 
     return result;
 }
 
-domain::BusRequest MakeBusRequest(const json::Dict& dict) {
-    domain::BusRequest result;
-    result.name = dict.at("name").AsString();
-
-    const json::Array& stops = dict.at("stops").AsArray();
-    result.stops.reserve(stops.size());
-    for (const json::Node& stop : stops) {
-        result.stops.push_back(stop.AsString());
-    }
-    result.is_roundtrip = true;
-    if(!dict.at("is_roundtrip").AsBool()) {
-        result.is_roundtrip = false;
-        for (int i = result.stops.size() - 2; i >= 0; --i) {
-            result.stops.push_back(result.stops[i]);
-        }
-    }
-    return result;
-}
-
-domain::StopRequest MakeStopRequest(const json::Dict& dict) {
-    domain::StopRequest result;
-    result.name = dict.at("name").AsString();
-    result.coordinates.lat = dict.at("latitude").AsDouble();
-    result.coordinates.lng = dict.at("longitude").AsDouble();
-
-    const json::Dict& neighbours = dict.at("road_distances").AsMap();
-
-    for (const std::pair<const std::string, json::Node>& neighbour : neighbours) {
-        result.neighbours[neighbour.first] = neighbour.second.AsInt();
-    }
-    return result;
-}
-
-void FillCatalogue(request_handler::RequstHandler& catalogue, const json::Array& requests) {
-    for (const json::Node& node : requests) {
-        const json::Dict& request = node.AsMap();
-        const std::string type = request.at("type").AsString();
-        if (type == "Stop") {
-            catalogue.AddStop(MakeStopRequest(request));
-        } else if (type == "Bus") {
-            catalogue.AddBus(MakeBusRequest(request));
-        }
-    }
-}
-
-json::Dict ProcessMapStat(const request_handler::RequstHandler& catalogue) {
-    json::Dict result;
-    result["map"] = catalogue.GetMap();
-    return result;
-}
-
-json::Dict ProcessBusStat(const request_handler::RequstHandler& catalogue, std::string_view name) {
-    domain::BusInfo info = catalogue.GetBusInfo(name);
-    json::Dict result;
-
-    if (!info.stops.empty()) {
-        result["curvature"] = info.length.curvature;
-        result["route_length"] = static_cast<int>(info.length.real_length);
-        result["stop_count"] = static_cast<int>(info.stops.size());
-        result["unique_stop_count"] = info.unique_stops;
+void JSONReader::GetOneStatRequest(const json::Node& request) {
+    const json::Dict& req_dict = request.AsMap();
+    std::string_view type = req_dict.at("type").AsString();
+    if (type == "Bus") {
+        AddStatRequest(detail::GetBusStatRequest(req_dict));
+    } else if (type == "Stop") {
+        AddStatRequest(detail::GetStopStatRequest(req_dict));
+    } else if (type == "Map") {
+        AddStatRequest(detail::GetMapStatRequest(req_dict));
     } else {
-        result["error_message"] = std::string("not found");
+        throw std::logic_error("json_reader::ProcessOneStat: only \"Map\", \"Bus\" and \"Stop\" requests supported!");
     }
-
-    return result;
 }
 
-json::Dict ProcessStopStat(const request_handler::RequstHandler& catalogue, std::string_view name) {
-    domain::StopInfo info = catalogue.GetStopInfo(name);
+void JSONReader::GetStatRequests(const json::Array& requests){
+    for (const json::Node& request : requests) {
+        GetOneStatRequest(request);
+    }
+}
+
+json::Dict JSONPrinter::ProcessStopRequest (const request_handler::StopInfo& stop_info){
     json::Dict result;
+
+    const domain::StopInfo& info = stop_info.info;
 
     if (info.was_found) {
         json::Array buses(info.buses.size());
@@ -147,100 +166,28 @@ json::Dict ProcessStopStat(const request_handler::RequstHandler& catalogue, std:
         result["error_message"] = std::string("not found");
     }
 
+    result["request_id"] = stop_info.id;
+
     return result;
 }
 
-json::Dict ProcessOneStat(const request_handler::RequstHandler& catalogue, const json::Dict& request) {
-    int id = request.at("id").AsInt();
-    std::string_view type = request.at("type").AsString();
-
+json::Dict JSONPrinter::ProcessBusRequest (const request_handler::BusInfo& bus_info){
     json::Dict result;
-    if (type == "Bus") {
-        std::string_view name = request.at("name").AsString();
-        result = ProcessBusStat(catalogue, name);
-    } else if (type == "Stop") {
-        std::string_view name = request.at("name").AsString();
-        result = ProcessStopStat(catalogue, name);
-    } else if (type == "Map") {
-        result = ProcessMapStat(catalogue);
+
+    const domain::BusInfo& info = bus_info.info;
+
+    if (!info.stops.empty()) {
+        result["curvature"] = info.length.curvature;
+        result["route_length"] = info.length.real_length;
+        result["stop_count"] = static_cast<int>(info.stops.size());
+        result["unique_stop_count"] = info.unique_stops;
     } else {
-        throw std::logic_error("json_reader::ProcessOneStat: only \"Map\", \"Bus\" and \"Stop\" requests supported!");
+        result["error_message"] = std::string("not found");
     }
 
-    //std::cout << std::endl << "-------------------------------" << std::endl;
-    //json::Print(Document{result}, std::cout);
-    //std::cout << std::endl << "-------------------------------" << std::endl;
+    result["request_id"] = bus_info.id;
 
-    result["request_id"] = id;
     return result;
 }
 
-void ProcessStatRequests(const request_handler::RequstHandler& catalogue,
-                         const json::Array& requests,
-                         std::ostream& out) {
-    if (requests.empty()) {
-        return;
-    }
-    json::Array result;
-
-    for (const json::Node& request : requests) {
-        result.push_back(ProcessOneStat(catalogue, request.AsMap()));
-    }
-
-    json::Print(json::Document{result}, out);
-}
-} //namespace detail
-void GetJSONDataFromIStream (request_handler::RequstHandler& catalogue,
-                             std::istream& in,     //default std::cin
-                             std::ostream& out) {  //default std::cout
-    using namespace json;
-
-    Document doc = Load(in);
-
-    const Node& root = doc.GetRoot();
-    const Dict& requests = root.AsMap();
-
-    auto render_settings_request_it = requests.find("render_settings");
-    if (render_settings_request_it != requests.end()) {
-        const Dict& render_settings_request = render_settings_request_it->second.AsMap();
-        catalogue.SetRenderSettings(detail::GetRenderSettings(render_settings_request));
-    }
-
-    auto base_requests_it = requests.find("base_requests");
-    auto stat_requests_it = requests.find("stat_requests");
-    assert(base_requests_it != requests.end());
-    assert(stat_requests_it != requests.end());
-
-    const Array& base_requests = base_requests_it->second.AsArray();
-    const Array& stat_requests = stat_requests_it->second.AsArray();
-
-    detail::FillCatalogue(catalogue, base_requests);
-
-    detail::ProcessStatRequests(catalogue, stat_requests, out);
-
-}
-
-void GetJSONDataFromIStreamAndRenderMap(std::istream& in,    //default std::cin
-                                        std::ostream& out) { //default std::cout
-    using namespace json;
-
-    TransportCatalogue data;
-    request_handler::RequstHandler handler(data);
-    Document doc = Load(in);
-
-    const Node& root = doc.GetRoot();
-    const Dict& requests = root.AsMap();
-
-    auto base_requests_it = requests.find("base_requests");
-    auto render_settings_request_it = requests.find("render_settings");
-    assert(base_requests_it != requests.end());
-    assert(render_settings_request_it != requests.end());
-
-    const Array& base_requests = base_requests_it->second.AsArray();
-    const Dict& render_settings_request = render_settings_request_it->second.AsMap();
-
-    detail::FillCatalogue(handler, base_requests);
-    map_renderer::RenderSettings render_settings = detail::GetRenderSettings(render_settings_request);
-    map_renderer::RenderMap(handler.GetData(), std::move(render_settings), out);
-}
 } //namespace stream_input_json

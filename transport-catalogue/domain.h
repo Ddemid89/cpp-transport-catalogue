@@ -54,6 +54,16 @@ struct BusInfo {
     int unique_stops;
 };
 
+struct BusForRender {
+    std::string_view name;
+    std::vector<std::string_view> stops;
+    bool is_roundtrip;
+
+    bool operator<(const BusForRender& other) const {
+        return name < other.name;
+    }
+};
+
 struct Point {
     Point() = default;
     Point(double x, double y)
@@ -87,55 +97,5 @@ struct Rgba {
 };
 
 using Color = std::variant<std::monostate, std::string, Rgb, Rgba>;
-
-class TransportData {
-public:
-    TransportData() = default;
-
-    TransportData(const TransportData&) = delete;
-
-    TransportData& operator=(const TransportData&) = delete;
-
-    TransportData(TransportData&&) = default;
-
-    void AddStop(const StopRequest& request);
-
-    void AddBus(const BusRequest& request);
-
-    const std::deque<Stop>& GetStopsArray() const;
-
-    std::deque<Stop>& GetStopsArray();
-
-    const std::deque<Bus>& GetBusesArray() const;
-
-    std::deque<Bus>& GetBusesArray();
-
-    const std::unordered_map<std::string_view, Bus*>& GetBusesMap() const;
-
-    std::unordered_map<std::string_view, Bus*>& GetBusesMap();
-
-    const std::unordered_map<std::string_view, Stop*>& GetStopsMap() const;
-
-    std::unordered_map<std::string_view, Stop*>& GetStopsMap();
-
-    const std::unordered_map<std::string_view, std::set<std::string_view>>&
-    GetStopsToBuses () const;
-
-    std::unordered_map<std::string_view, std::set<std::string_view>>&
-    GetStopsToBuses ();
-
-    Stop& GetStop(std::string_view name);
-
-    Bus& GetBus(std::string_view name);
-
-private:
-    Stop& GetStopRef(std::string_view name);
-
-    std::deque<Stop> stops_;
-    std::deque<Bus> buses_;
-    std::unordered_map<std::string_view, Stop*> stops_refs_;
-    std::unordered_map<std::string_view, Bus*> buses_refs_;
-    std::unordered_map<std::string_view, std::set<std::string_view>> stops_to_buses_;
-};
 
 } //namespace domain
