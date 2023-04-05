@@ -7,6 +7,7 @@
 #include "domain.h"
 #include "map_renderer.h"
 #include "request_handler.h"
+#include "json_builder.h"
 
 namespace stream_input_json {
 
@@ -20,7 +21,7 @@ public:
         doc_ = Load(in_);
 
         const Node& root = doc_.GetRoot();
-        const Dict& requests = root.AsMap();
+        const Dict& requests = root.AsDict();
 
         auto settings_request_it = requests.find("render_settings");
         auto base_requests_it = requests.find("base_requests");
@@ -35,7 +36,7 @@ public:
         GetBaseRequests(base_requests);
 
         if (settings_request_it != end) {
-            const Dict& settings_request = settings_request_it->second.AsMap();
+            const Dict& settings_request = settings_request_it->second.AsDict();
             settings_ = GetRenderSettings(settings_request);
         }
 
@@ -73,10 +74,10 @@ public:
     }
 
     void Print(request_handler::MapInfo& request) override {
-        json::Dict result;
-        result["map"] = request.map_str;
-        result["request_id"] = request.id;
-        answers_.push_back(result);
+        answers_.push_back(json::Builder{}.StartDict()
+                                              .Key("map").Value(request.map_str)
+                                              .Key("request_id").Value(request.id)
+                                          .EndDict().Build());
     }
 
     void RenderAll() override {

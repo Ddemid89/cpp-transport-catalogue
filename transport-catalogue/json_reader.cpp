@@ -6,6 +6,7 @@
 #include "domain.h"
 #include "map_renderer.h"
 #include "request_handler.h"
+#include "json_builder.h"
 
 namespace stream_input_json {
 namespace detail {
@@ -28,7 +29,7 @@ request_handler::AddingStopRequest GetStopRequest(const json::Dict& stop_request
     result.latitude = stop_request.at("latitude").AsDouble();
     result.longitude = stop_request.at("longitude").AsDouble();
 
-    const json::Dict& neighbours = stop_request.at("road_distances").AsMap();
+    const json::Dict& neighbours = stop_request.at("road_distances").AsDict();
     for (const std::pair<const std::string, json::Node>& neighbour : neighbours) {
         result.neighbours[neighbour.first] = neighbour.second.AsInt();
     }
@@ -87,7 +88,7 @@ domain::Point GetPoint(const json::Array& point) {
 
 
 void JSONReader::GetOneBaseRequest(const json::Node& request) {
-    const json::Dict& req_dict = request.AsMap();
+    const json::Dict& req_dict = request.AsDict();
     std::string_view type = req_dict.at("type").AsString();
     if (type == "Bus") {
         AddBaseRequest(detail::GetBusRequest(req_dict));
@@ -131,7 +132,7 @@ request_handler::RenderSettings JSONReader::GetRenderSettings(const json::Dict& 
 }
 
 void JSONReader::GetOneStatRequest(const json::Node& request) {
-    const json::Dict& req_dict = request.AsMap();
+    const json::Dict& req_dict = request.AsDict();
     std::string_view type = req_dict.at("type").AsString();
     if (type == "Bus") {
         AddStatRequest(detail::GetBusStatRequest(req_dict));
@@ -151,9 +152,13 @@ void JSONReader::GetStatRequests(const json::Array& requests){
 }
 
 json::Dict JSONPrinter::ProcessStopRequest (const request_handler::StopInfo& stop_info){
-    json::Dict result;
+    using namespace std::literals;
 
     const domain::StopInfo& info = stop_info.info;
+
+    json::Builder builder{};
+
+    builder.StartDict();
 
     if (info.was_found) {
         json::Array buses(info.buses.size());
@@ -161,33 +166,35 @@ json::Dict JSONPrinter::ProcessStopRequest (const request_handler::StopInfo& sto
                        [](std::string_view name){
                            return std::string(name);
                        });
-        result["buses"] = std::move(buses);
+        builder.Key("buses").Value(std::move(buses));
     } else {
-        result["error_message"] = std::string("not found");
+        builder.Key("error_message").Value("not found"s);
     }
 
-    result["request_id"] = stop_info.id;
-
-    return result;
+    return builder.Key("request_id").Value(stop_info.id)
+                  .EndDict().Build().AsDict();
 }
 
 json::Dict JSONPrinter::ProcessBusRequest (const request_handler::BusInfo& bus_info){
-    json::Dict result;
+    using namespace std::literals;
 
     const domain::BusInfo& info = bus_info.info;
 
+    json::Builder builder{};
+
+    builder.StartDict();
+
     if (!info.stops.empty()) {
-        result["curvature"] = info.length.curvature;
-        result["route_length"] = info.length.real_length;
-        result["stop_count"] = static_cast<int>(info.stops.size());
-        result["unique_stop_count"] = info.unique_stops;
+        builder.Key("curvature").Value(info.length.curvature)
+               .Key("route_length").Value(info.length.real_length)
+               .Key("stop_count").Value(static_cast<int>(info.stops.size()))
+               .Key("unique_stop_count").Value(info.unique_stops);
     } else {
-        result["error_message"] = std::string("not found");
+        builder.Key("error_message").Value("not found"s);
     }
 
-    result["request_id"] = bus_info.id;
-
-    return result;
+    return builder.Key("request_id").Value(bus_info.id)
+                  .EndDict().Build().AsDict();
 }
 
 } //namespace stream_input_json
