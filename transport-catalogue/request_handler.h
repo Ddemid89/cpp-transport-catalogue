@@ -10,7 +10,6 @@
 #include <memory>
 #include "svg.h"
 
-
 namespace request_handler {
 
 struct StopInfo {
@@ -25,6 +24,25 @@ struct BusInfo {
 
 struct MapInfo {
     std::string map_str;
+    int id;
+};
+
+enum class ItemType {
+    Bus,
+    Wait
+};
+
+struct RouteItem {
+    ItemType type;
+    std::string_view name;
+    double time;
+    int count;
+};
+
+struct RouteInfo {
+    double total_time;
+    std::vector<RouteItem> items;
+
     int id;
 };
 
@@ -47,6 +65,11 @@ struct RenderSettings {
     double underlayer_width;
 
     std::vector<domain::Color> color_palette;
+};
+
+struct RoutingSettings {
+    double bus_velocity;
+    int    wait_time;
 };
 
 class RequestHandler;
@@ -73,7 +96,7 @@ struct StatRequest {
 struct StopInfoRequest;
 struct BusInfoRequest;
 struct MapInfoRequest;
-
+struct RoutingInfoRequest;
 
 class RequestReader{
 public:
@@ -87,12 +110,15 @@ public:
         return stat_requests_;
     }
 
-    RenderSettings& GetSettings() {
+    RenderSettings GetSettings() const {
         return settings_;
     }
 
-protected:
+    RoutingSettings GetRoutingSettings() const {
+        return routing_settings_;
+    }
 
+protected:
     template <class RequestType>
     void AddStatRequest(RequestType&& request) {
         stat_requests_.push_back(std::make_unique<RequestType>(request));
@@ -108,6 +134,7 @@ protected:
     std::vector<std::unique_ptr<BaseRequest>> base_requests_;
     std::vector<std::unique_ptr<StatRequest>> stat_requests_;
     RenderSettings settings_;
+    RoutingSettings routing_settings_;
 };
 
 class RequestPrinter{
@@ -115,6 +142,7 @@ public:
     virtual void Print(const BusInfo&) = 0;
     virtual void Print(const StopInfo&) = 0;
     virtual void Print(MapInfo&) = 0;
+    virtual void Print(RouteInfo&) = 0;
     virtual void RenderAll() = 0;
     virtual void Clear() = 0;
 protected:
@@ -128,8 +156,8 @@ MapData(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops_
                                                           buses(buses_in) {}
 
 
-const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops_used;
-const std::set<domain::BusForRender>& buses;
+const std::vector<std::pair<std::string_view, geo::Coordinates>> stops_used;
+const std::set<domain::BusForRender> buses;
 };
 
 class MapRenderer{
@@ -154,15 +182,20 @@ public:
 
     void Process(MapInfoRequest&);
 
+    void Process(RoutingInfoRequest&);
+
     void AddBus(const domain::BusRequest& request);
 
     void AddStop (const domain::StopRequest& request);
 
 private:
+    const MapData& GetMapData() const;
+
     TransportCatalogue& catalogue_;
     RequestPrinter& printer_;
     MapRenderer& map_renderer_;
-    std::optional<RenderSettings> render_settings_;
+    RenderSettings render_settings_;
+    RoutingSettings routing_settings_;
 };
 
 struct AddingStopRequest : BaseRequest {
@@ -215,6 +248,28 @@ struct MapInfoRequest : StatRequest{
     }
 
     ~MapInfoRequest() override = default;
+};
+
+struct RoutingInfoRequest : StatRequest {
+    std::string_view stop_from;
+    std::string_view stop_to;
+
+    void ProcessMeBy(RequestHandler& handler) override {
+        handler.Process(*this);
+    }
+
+    ~RoutingInfoRequest() override = default;
+};
+
+class DistanceComputer {
+public:
+    DistanceComputer(const TransportCatalogue& catalogue) : catalogue_(catalogue) {}
+
+    int ComputeDistance(std::string_view from, std::string_view to) const {
+        return catalogue_.GetDistance(from, to);
+    }
+private:
+    const TransportCatalogue& catalogue_;
 };
 
 } //namespace request_handler

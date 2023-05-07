@@ -1,3 +1,4 @@
+#include "transport_router.h"
 #include "request_handler.h"
 #include "domain.h"
 #include <string_view>
@@ -9,6 +10,7 @@
 #include "transport_catalogue.h"
 #include "svg.h"
 #include <algorithm>
+
 
 namespace request_handler {
 
@@ -33,24 +35,58 @@ void RequestHandler::Process(BusInfoRequest& request) {
 }
 
 void RequestHandler::Process(MapInfoRequest& request) {
-    if (render_settings_) {
         std::ostringstream out;
-        map_renderer_.SetRenderSettings(render_settings_.value());
+        map_renderer_.SetRenderSettings(render_settings_);
 
-        std::vector<std::pair<std::string_view, geo::Coordinates>> used_stops = catalogue_.GetStopsUsed();
-        std::set<domain::BusForRender> buses = catalogue_.GetBusesForRender();
+        //std::vector<std::pair<std::string_view, geo::Coordinates>> used_stops = catalogue_.GetStopsUsed();
+        //std::set<domain::BusForRender> buses = catalogue_.GetBusesForRender();
 
-        MapData data(used_stops, buses);
-        map_renderer_.RenderMap(data, out);
+        //MapData data(used_stops, buses);
+        //map_renderer_.RenderMap(data, out);
+        map_renderer_.RenderMap(GetMapData(), out);
 
         MapInfo map_info;
         map_info.id = request.id;
         map_info.map_str = out.str();
 
         printer_.Print(map_info);
-    } else {
-        throw std::runtime_error("No render setting!");
+}
+
+void RequestHandler::Process(RoutingInfoRequest& request) {
+    static transport_router::TransportRouter router (routing_settings_,
+                                                     DistanceComputer(catalogue_),
+                                                     GetMapData());
+
+    transport_router::RouteItems route_items = router.FindRoute(request.stop_from, request.stop_to);
+
+    RouteInfo route_info;
+    route_info.id = request.id;
+
+    route_info.total_time = route_items.total_time;
+    int wait_time = routing_settings_.wait_time;
+
+    for (size_t i = 0; i < route_items.items.size(); ++i) {
+        transport_router::RouteItem& item = route_items.items[i];
+
+        RouteItem wait_item;
+
+        wait_item.type = ItemType::Wait;
+        wait_item.name = item.start;
+        wait_item.time = wait_time;
+        wait_item.count = 1;
+
+        RouteItem bus_item;
+
+        bus_item.type = ItemType::Bus;
+        bus_item.name = item.name;
+        bus_item.time = item.time - wait_time;
+        bus_item.count = item.count;
+
+        route_info.items.push_back(wait_item);
+        route_info.items.push_back(bus_item);
     }
+
+    printer_.Print(route_info);
 }
 
 RequestHandler::RequestHandler(TransportCatalogue& catalogue,
@@ -61,7 +97,8 @@ RequestHandler::RequestHandler(TransportCatalogue& catalogue,
                                                             map_renderer_(map_renderer) {
     reader.Read();
 
-    render_settings_ = reader.GetSettings();
+    render_settings_  = reader.GetSettings();
+    routing_settings_ = reader.GetRoutingSettings();
 
     std::vector<std::unique_ptr<BaseRequest>>& requests = reader.GetBaseRequests();
     for (std::unique_ptr<BaseRequest>& request : requests) {
@@ -83,6 +120,11 @@ void RequestHandler::AddBus(const domain::BusRequest& request) {
 
 void RequestHandler::AddStop (const domain::StopRequest& request) {
     catalogue_.AddStop(request);
+}
+
+const MapData& RequestHandler::GetMapData() const {
+    static const MapData data = MapData(catalogue_.GetStopsUsed(), catalogue_.GetBusesForRender());
+    return data;
 }
 
 } //namespace request_handler

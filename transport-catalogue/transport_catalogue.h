@@ -31,6 +31,8 @@ public:
 
     std::vector<std::pair<std::string_view, geo::Coordinates>> GetStopsUsed() const;
 
+    int GetDistance(std::string_view from, std::string_view to) const;
+
 //Debug========================================================================
     size_t GetStopsSize() const {
         assert(stops_.size() == stops_refs_.size());

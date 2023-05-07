@@ -107,8 +107,21 @@ int TransportCatalogue::GetRealDistance(const domain::Stop& a, const domain::Sto
     if (it != end) {
         return (*it).second;
     }
-    throw std::logic_error("GetRealDistance: NO DATA!!!");
+    throw std::logic_error("GetRealDistance: NO DATA! (" + a.name + " -> " + b.name + ")\n");
     return -1;
+}
+
+
+int TransportCatalogue::GetDistance(std::string_view from, std::string_view to) const {
+    auto from_it = stops_refs_.find(from);
+    auto to_it   = stops_refs_.find(to);
+    auto end_it = stops_refs_.end();
+
+    if (from_it == end_it || to_it == end_it) {
+        throw std::logic_error("GetDistance: NO STOPS!");
+    }
+
+    return GetRealDistance(*from_it->second, *to_it->second);
 }
 
 domain::DistanceInfo TransportCatalogue::ComputeRouteLength(std::string_view name) const {

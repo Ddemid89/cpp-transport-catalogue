@@ -56,6 +56,14 @@ request_handler::MapInfoRequest GetMapStatRequest(const json::Dict& request) {
     return result;
 }
 
+request_handler::RoutingInfoRequest GetRouteStatRequest(const json::Dict& request) {
+    request_handler::RoutingInfoRequest result;
+    result.id = request.at("id").AsInt();
+    result.stop_from = request.at("from").AsString();
+    result.stop_to = request.at("to").AsString();
+    return result;
+}
+
 domain::Color GetColor(const json::Node& color) {
     domain::Color result;
 
@@ -131,6 +139,15 @@ request_handler::RenderSettings JSONReader::GetRenderSettings(const json::Dict& 
     return result;
 }
 
+request_handler::RoutingSettings JSONReader::GetRoutingSettings(const json::Dict& request) {
+    request_handler::RoutingSettings result;
+
+    result.bus_velocity = request.at("bus_velocity").AsDouble();
+    result.wait_time    = request.at("bus_wait_time").AsInt();
+
+    return result;
+}
+
 void JSONReader::GetOneStatRequest(const json::Node& request) {
     const json::Dict& req_dict = request.AsDict();
     std::string_view type = req_dict.at("type").AsString();
@@ -140,8 +157,10 @@ void JSONReader::GetOneStatRequest(const json::Node& request) {
         AddStatRequest(detail::GetStopStatRequest(req_dict));
     } else if (type == "Map") {
         AddStatRequest(detail::GetMapStatRequest(req_dict));
+    } else if (type == "Route"){
+        AddStatRequest(detail::GetRouteStatRequest(req_dict));
     } else {
-        throw std::logic_error("json_reader::ProcessOneStat: only \"Map\", \"Bus\" and \"Stop\" requests supported!");
+        throw std::logic_error("json_reader::ProcessOneStat: unsupported request \"" + std::string(type) + "\"\n");
     }
 }
 
