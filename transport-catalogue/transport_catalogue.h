@@ -9,6 +9,7 @@
 #include <cassert>
 #include <set>
 #include <variant>
+#include <algorithm>
 #include "domain.h"
 
 class TransportCatalogue {
@@ -18,6 +19,8 @@ public:
     TransportCatalogue(const TransportCatalogue&) = delete;
 
     TransportCatalogue& operator=(const TransportCatalogue&) = delete;
+
+    TransportCatalogue(TransportCatalogue&& other);
 
     void AddStop(const domain::StopRequest& request);
 
@@ -33,17 +36,14 @@ public:
 
     int GetDistance(std::string_view from, std::string_view to) const;
 
-//Debug========================================================================
-    size_t GetStopsSize() const {
-        assert(stops_.size() == stops_refs_.size());
-        return stops_.size();
-    }
+    std::vector<const domain::Stop*> GetAllStops() const;
 
-    size_t GetBusesSize() const {
-        assert(buses_.size() == buses_refs_.size());
-        return buses_.size();
-    }
-//Debug========================================================================
+    std::vector<const domain::Bus*> GetAllBuses() const;
+
+    std::vector<std::pair<std::pair<std::string_view, std::string_view>, int>> GetDistances() const;
+
+    void AddDistance(std::string_view from, std::string_view to, int distance);
+
 private:
     using StopPtrPair = std::pair<const domain::Stop*,const domain::Stop*>;
 

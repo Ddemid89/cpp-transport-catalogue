@@ -8,8 +8,74 @@
 #include <optional>
 #include "transport_catalogue.h"
 #include <memory>
+#include <map>
 #include "svg.h"
 
+namespace transport_router {
+
+using VertexId = size_t;
+using EdgeId = size_t;
+
+struct WholeRoute {
+    double time;
+    std::vector<VertexId> edges_ids;
+};
+
+using StopRoutes = std::unordered_map<VertexId, WholeRoute>;
+
+struct DeserializedRouterItem {
+    size_t name;
+    size_t start;
+    double time;
+    int count;
+};
+
+struct DeserializedRouterItems {
+    double total_time = -1;
+    std::vector<size_t> items;
+};
+
+struct RouterItem {
+    std::string_view name;
+    std::string_view start;
+    double time;
+    int count;
+};
+
+struct RouterItems {
+    double total_time = -1;
+    std::vector<RouterItem> items;
+};
+
+struct RouterSerializationData {
+    const std::unordered_map<std::string_view, VertexId>& stop_vertexes;
+    const std::vector<RouterItem>& edges;
+    std::unordered_map<VertexId, StopRoutes> data;
+    int wait_time;
+    double bus_velocity;
+};
+
+struct LazyRouterData {
+    std::vector<std::pair<std::string_view, size_t>> stops_ids;
+    std::vector<std::pair<std::string_view, size_t>> buses_ids;
+    std::vector<std::pair<size_t, DeserializedRouterItem>> edges;
+    std::unordered_map<size_t, std::unordered_map<size_t, DeserializedRouterItems>> routes;
+    int wait_time;
+    double bus_velocity;
+};
+
+class RouterBase {
+public:
+    RouterBase(int wait_time, double bus_velocity) : wait_time_(wait_time), bus_velocity_(bus_velocity) {}
+    virtual RouterItems FindRoute(std::string_view from, std::string_view to) = 0;
+    virtual RouterSerializationData GetSerializationData() = 0;
+    int GetWaitTime () {return wait_time_;}
+    double GetBusVelocity () {return bus_velocity_;}
+protected:
+    int wait_time_;
+    double bus_velocity_;
+};
+} //namespace transport_router
 namespace request_handler {
 
 struct StopInfo {
@@ -72,12 +138,18 @@ struct RoutingSettings {
     int    wait_time;
 };
 
+struct SerializationSettings {
+    std::string file;
+};
+
 class RequestHandler;
+class BaseRequestHandler;
+class StatRequestHandler;
 
 struct BaseRequest {
     std::string_view name;
 
-    virtual void AddMeTo(RequestHandler& handler) = 0;
+    virtual void AddMeTo(BaseRequestHandler& handler) = 0;
 
     virtual ~BaseRequest() = default;
 };
@@ -88,7 +160,7 @@ struct AddingBusRequest;
 struct StatRequest {
     int id;
 
-    virtual void ProcessMeBy(RequestHandler& handler) = 0;
+    virtual void ProcessMeBy(StatRequestHandler& handler) = 0;
 
     virtual ~StatRequest() = default;
 };
@@ -110,12 +182,16 @@ public:
         return stat_requests_;
     }
 
-    RenderSettings GetSettings() const {
+    const RenderSettings& GetSettings() const {
         return settings_;
     }
 
-    RoutingSettings GetRoutingSettings() const {
+    const RoutingSettings& GetRoutingSettings() const {
         return routing_settings_;
+    }
+
+    const SerializationSettings& GetSerializationSettings() const {
+        return serialization_settings_;
     }
 
 protected:
@@ -135,6 +211,7 @@ protected:
     std::vector<std::unique_ptr<StatRequest>> stat_requests_;
     RenderSettings settings_;
     RoutingSettings routing_settings_;
+    SerializationSettings serialization_settings_;
 };
 
 class RequestPrinter{
@@ -164,38 +241,59 @@ class MapRenderer{
 public:
     virtual void SetRenderSettings (const RenderSettings& settings) = 0;
     virtual void RenderMap (const MapData& data, std::ostream& out) = 0;
+    virtual void SetStopPoints(std::map<std::string, domain::Point>& stops_points) = 0;
+    virtual void ComputeStopPoints(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops) = 0;
+    virtual std::map<std::string_view, domain::Point>
+    GetStopPoints() const  = 0;
+
     virtual ~MapRenderer() = default;
 };
 
-class RequestHandler{
+class RequestHandler {
 public:
-    RequestHandler(TransportCatalogue& catalogue, RequestReader& reader,
-                   RequestPrinter& printer, MapRenderer& map_renderer);
+    RequestHandler (TransportCatalogue& catalogue) : catalogue_(catalogue) {}
+protected:
+    TransportCatalogue& catalogue_;
+};
+
+class BaseRequestHandler : public RequestHandler {
+public:
+    BaseRequestHandler(TransportCatalogue& catalogue) : RequestHandler(catalogue) {}
 
     void Add(AddingStopRequest&);
-
     void Add(AddingBusRequest&);
 
+    void ProcessBaseRequests(std::vector<std::unique_ptr<BaseRequest>>& base_requests);
+    void ProcessBaseRequests(RequestReader& filled_reader);
+};
+
+class StatRequestHandler : public RequestHandler {
+public:
+    StatRequestHandler(TransportCatalogue& catalogue,
+                       RequestPrinter& printer,
+                       MapRenderer& renderer) : RequestHandler(catalogue),
+                                                printer_(printer),
+                                                map_renderer_(renderer) {}
+
     void Process(StopInfoRequest&);
-
     void Process(BusInfoRequest&);
-
     void Process(MapInfoRequest&);
-
     void Process(RoutingInfoRequest&);
 
-    void AddBus(const domain::BusRequest& request);
+    void ProcessRequests(RequestReader& reader);
+    void ProcessRequests(std::vector<std::unique_ptr<StatRequest>>& requests);
 
-    void AddStop (const domain::StopRequest& request);
+    void SetCustomRouter(std::unique_ptr<transport_router::RouterBase>&& router) {
+        router_ = std::move(router);
+    }
 
 private:
     const MapData& GetMapData() const;
 
-    TransportCatalogue& catalogue_;
     RequestPrinter& printer_;
     MapRenderer& map_renderer_;
-    RenderSettings render_settings_;
     RoutingSettings routing_settings_;
+    std::unique_ptr<transport_router::RouterBase> router_;
 };
 
 struct AddingStopRequest : BaseRequest {
@@ -203,7 +301,7 @@ struct AddingStopRequest : BaseRequest {
     double longitude;
     std::unordered_map<std::string_view, int> neighbours;
 
-    void AddMeTo(RequestHandler& handler) override {
+    virtual void AddMeTo(BaseRequestHandler& handler) override {
         handler.Add(*this);
     }
 
@@ -214,7 +312,7 @@ struct AddingBusRequest : BaseRequest {
     std::vector<std::string_view> stops;
     bool is_roundtrip;
 
-    void AddMeTo(RequestHandler& handler) override {
+    virtual void AddMeTo(BaseRequestHandler& handler) override {
         handler.Add(*this);
     }
 
@@ -224,7 +322,7 @@ struct AddingBusRequest : BaseRequest {
 struct StopInfoRequest : StatRequest{
     std::string_view name;
 
-    void ProcessMeBy(RequestHandler& handler) override {
+    void ProcessMeBy(StatRequestHandler& handler) override {
         handler.Process(*this);
     }
 
@@ -234,7 +332,7 @@ struct StopInfoRequest : StatRequest{
 struct BusInfoRequest : StatRequest{
     std::string_view name;
 
-    void ProcessMeBy(RequestHandler& handler) override {
+    void ProcessMeBy(StatRequestHandler& handler) override {
         handler.Process(*this);
     }
 
@@ -243,7 +341,7 @@ struct BusInfoRequest : StatRequest{
 
 struct MapInfoRequest : StatRequest{
 
-    void ProcessMeBy(RequestHandler& handler) override {
+    void ProcessMeBy(StatRequestHandler& handler) override {
         handler.Process(*this);
     }
 
@@ -254,7 +352,7 @@ struct RoutingInfoRequest : StatRequest {
     std::string_view stop_from;
     std::string_view stop_to;
 
-    void ProcessMeBy(RequestHandler& handler) override {
+    void ProcessMeBy(StatRequestHandler& handler) override {
         handler.Process(*this);
     }
 
@@ -272,4 +370,22 @@ private:
     const TransportCatalogue& catalogue_;
 };
 
+class CatalogueSerializationHandler {
+public:
+    CatalogueSerializationHandler(const SerializationSettings& settings) : file_(settings.file) {}
+
+    void Serialize(RequestReader& reader, MapRenderer& renderer);
+private:
+    std::string file_;
+};
+
+class CatalogueDeserializationHandler {
+public:
+    CatalogueDeserializationHandler(const SerializationSettings& settings);
+    void Deserialize(RequestPrinter& printer, MapRenderer& renderer, RequestReader& reader);
+private:
+    std::string file_;
+};
+
 } //namespace request_handler
+

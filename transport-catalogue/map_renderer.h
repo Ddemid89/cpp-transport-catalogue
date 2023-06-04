@@ -36,27 +36,18 @@ public:
         settings_ = ConvertRenderSettings(settings);
     }
 
-    void RenderMap(const request_handler::MapData& data, std::ostream& out) override {
-        if(!settings_) {
-            throw std::logic_error("MapRendererJSON: can`t render without render settings!");
-        }
+    void SetStopPoints(std::map<std::string, domain::Point>& stops_points) override;
 
-        stops_points_ = GetStopPoints(data.stops_used);
-        RenderBuses(data.buses);
-        RenderStops();
+    std::map<std::string_view, domain::Point>
+    GetStopPoints() const;
 
-        doc_.Render(out);
+    void ComputeStopPoints(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops);
 
-        stops_points_.clear();
-        doc_ = svg::Document();
-    }
+    void RenderMap(const request_handler::MapData& data, std::ostream& out) override;
 
     ~MapRendererJSON() override = default;
 private:
     RenderSettings ConvertRenderSettings(const request_handler::RenderSettings& settings);
-
-    std::map<std::string_view, svg::Point>
-    GetStopPoints(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops);
 
     void RenderStops();
 
@@ -68,7 +59,7 @@ private:
     std::optional<RenderSettings> settings_;
     svg::Document doc_;
     std::map<std::string_view, svg::Point> stops_points_;
+    bool have_stop_points_ = false;
 };
-
 
 } //namespace map_renderer

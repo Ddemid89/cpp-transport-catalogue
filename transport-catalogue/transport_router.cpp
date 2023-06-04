@@ -12,26 +12,8 @@
 
 namespace transport_router {
 
-RouteItems TransportRouter::FindRoute(std::string_view from, std::string_view to) {
-    RouteItems result;
-    if (from == to) {
-        result.total_time = 0;
-        return result;
-    }
-
-    VertexId from_id, to_id;
-
-    try {
-        from_id = GetVertexId(from);
-    } catch (std::invalid_argument& e) {
-        return result;
-    }
-
-    try {
-        to_id   = GetVertexId(to);
-    } catch (std::invalid_argument& e) {
-        return result;
-    }
+RouterItems TransportRouter::FindRouteById(VertexId from_id, VertexId to_id) {
+    RouterItems result;
 
     auto opt_info = router_.BuildRoute(from_id, to_id);
 
@@ -51,6 +33,7 @@ RouteItems TransportRouter::FindRoute(std::string_view from, std::string_view to
 
     return result;
 }
+
 
 graph::Router<double> TransportRouter::MakeRouter(const request_handler::MapData& data) {
     const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops_used = data.stops_used;
@@ -131,13 +114,128 @@ void TransportRouter::AddEdge(std::string_view from, std::string_view to,
     edge.to = to_id;
     graph_.AddEdge(edge);
 
-    RouteItem item;
+    RouterItem item;
     item.name  = bus_name;
     item.start = from;
     item.time  = weight;
     item.count = stops_count;
 
     edges_.push_back(item);
+}
+
+
+std::unordered_map<VertexId, StopRoutes> TransportRouter::MakeBaseData() {
+    std::unordered_map<VertexId, StopRoutes> result;
+    for (auto [from_name, from_id] : stop_vertexes_) {
+        StopRoutes& routes = result[from_id];
+        for (auto [to_name, to_id] : stop_vertexes_) {
+            if (from_id != to_id) {
+                auto route = router_.BuildRoute(from_id, to_id);
+                if (route) {
+                    routes[to_id].time = route->weight;
+                    routes[to_id].edges_ids = std::move(route->edges);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+RouterItems TransportRouter::FindRoute(std::string_view from, std::string_view to) {
+    RouterItems result;
+    if (from == to) {
+        result.total_time = 0;
+        return result;
+    }
+
+    VertexId from_id, to_id;
+
+    try {
+        from_id = GetVertexId(from);
+    } catch (std::invalid_argument& e) {
+        return result;
+    }
+
+    try {
+        to_id   = GetVertexId(to);
+    } catch (std::invalid_argument& e) {
+        return result;
+    }
+    return FindRouteById(from_id, to_id);
+}
+
+LazyRouter::LazyRouter(LazyRouterData& data) : RouterBase(data.wait_time, data.bus_velocity) {
+    stop_ids_.reserve(data.stops_ids.size());
+    stop_by_id_.reserve(data.stops_ids.size());
+    bus_ids_.reserve(data.buses_ids.size());
+    bus_by_id_.reserve(data.buses_ids.size());
+
+    for (auto [name, id] : data.stops_ids) {
+        stop_ids_[name] = id;
+        stop_by_id_[id] = name;
+    }
+
+    for (auto [name, id] : data.buses_ids) {
+        bus_ids_[name] = id;
+        bus_by_id_[id] = name;
+    }
+
+    for (auto& [id, item] : data.edges) {
+        edges_.push_back(std::move(item));
+        edge_ids_[id] = &edges_.back();
+    }
+
+    from_to_routes_ = std::move(data.routes);
+
+    wait_time_ = data.wait_time;
+    bus_velocity_ = data.bus_velocity;
+}
+
+RouterItems LazyRouter::FindRoute(std::string_view from, std::string_view to) {
+    RouterItems result;
+
+    if (from == to) {
+        result.total_time = 0;
+        return result;
+    }
+
+    auto it_end  = stop_ids_.end();
+    auto it_from = stop_ids_.find(from);
+    auto it_to   = stop_ids_.find(to);
+    if (it_from == it_end || it_to == it_end) {
+        return result;
+    }
+
+    size_t from_id = it_from->second;
+    size_t to_id   = it_to->second;
+
+    auto it_from_to = from_to_routes_.at(from_id).find(to_id);
+
+    if (it_from_to == from_to_routes_.at(from_id).end()) {
+        return {};
+    }
+
+    DeserializedRouterItems& route = it_from_to->second;
+
+    result.total_time = route.total_time;
+
+    result.items.reserve(route.items.size());
+
+    for (size_t item : route.items) {
+        result.items.push_back(ConvertRouterItem(item));
+    }
+    return result;
+}
+
+RouterItem LazyRouter::ConvertRouterItem(size_t item_id) {
+    RouterItem result;
+    DeserializedRouterItem& item = *edge_ids_[item_id];
+
+    result.count = item.count;
+    result.time  = item.time;
+    result.start = stop_by_id_.at(item.start);
+    result.name  = bus_by_id_.at(item.name);
+    return result;
 }
 
 } //namespace transport_router

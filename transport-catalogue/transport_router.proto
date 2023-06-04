@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package transport_catalogue_serialize;
+
+message CatalogueIdToRouterId {
+	uint32 catalogue_id = 1;
+	uint32 router_id = 2;
+}
+
+message Edge {
+	uint32 edge_id = 1;
+	uint32 stop_id = 2;
+	uint32 bus_id = 3;
+	double time = 4;
+	uint32 count = 5;
+}
+
+message Route {
+	uint32 to_id = 1;
+	double weight = 2;
+	repeated uint32 edge_id = 3;
+}
+
+message StopRoutes {
+	uint32 from_id = 1;
+	repeated Route route = 2;
+}
+
+message RouterData {
+	repeated CatalogueIdToRouterId stop_ids = 1;
+	repeated Edge edges = 2;
+	repeated StopRoutes stop_route = 3;
+	uint32 wait_time = 4;
+	double bus_velocity = 5;
+}
+

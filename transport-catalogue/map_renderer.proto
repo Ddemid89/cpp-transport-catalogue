@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package transport_catalogue_serialize;
+
+message RGB {
+	uint32 r = 1;
+	uint32 g = 2;
+	uint32 b = 3;
+}
+
+message RGBA {
+	uint32 r = 1;
+	uint32 g = 2;
+	uint32 b = 3;
+	double a = 4;
+}
+
+message Color {
+	oneof value{
+		RGB rgb = 1;
+		RGBA rgba = 2;
+		string str_color = 3;
+	}
+}
+
+message Point {
+	double x = 1;
+	double y = 2;
+}
+
+message StopPoint {
+    uint32 name = 1;
+    Point coordinates = 2;
+}
+
+message RenderSettings {
+	uint32 stop_label_font_size = 1;
+	uint32 bus_label_font_size = 2;
+
+	double width = 3;
+	double height = 4;
+	double padding = 5;
+	double line_width = 6;
+	double stop_radius = 7;
+	double underlayer_width = 8;
+
+	Point bus_label_offset = 9;
+	Point stop_label_offset = 10;
+
+	Color underlayer_color = 11;
+
+	repeated Color color_palette = 12;
+}
+
+message MapRenderer {
+    RenderSettings settings = 1;
+    repeated StopPoint stop_point = 2;
+}

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <cassert>
 
 namespace map_renderer {
 namespace detail {
@@ -96,6 +97,43 @@ svg::Color ConvertOneColor(const domain::Color& color) {
 
 } //namespace detail
 
+//===================================MapRendererJSON========================================
+
+void MapRendererJSON::SetStopPoints(std::map<std::string, domain::Point>& stops_points) {
+    std::for_each(stops_points.begin(), stops_points.end(),
+        [this](std::pair<const std::string, domain::Point>& point) {
+            svg::Point svg_point{point.second.x, point.second.y};
+            stops_points_[point.first] = svg_point;
+        });
+        have_stop_points_ = true;
+}
+
+std::map<std::string_view, domain::Point>
+MapRendererJSON::GetStopPoints() const {
+    std::map<std::string_view, domain::Point> result;
+    assert(have_stop_points_);
+
+    std::for_each(stops_points_.begin(), stops_points_.end(),
+                  [&result](const std::pair<const std::string_view, svg::Point>& point){
+                      result[point.first] = {point.second.x, point.second.y};
+                  });
+    return result;
+}
+
+void MapRendererJSON::RenderMap(const request_handler::MapData& data, std::ostream& out) {
+    if(!settings_) {
+        throw std::logic_error("MapRendererJSON: can`t render without render settings!");
+    }
+
+    if (!have_stop_points_) {
+        ComputeStopPoints(data.stops_used);
+    }
+
+    RenderBuses(data.buses);
+    RenderStops();
+    doc_.Render(out);
+    doc_ = svg::Document();
+}
 
 RenderSettings MapRendererJSON::ConvertRenderSettings(const request_handler::RenderSettings& settings) {
     RenderSettings result;
@@ -121,10 +159,9 @@ RenderSettings MapRendererJSON::ConvertRenderSettings(const request_handler::Ren
     return result;
 }
 
-std::map<std::string_view, svg::Point>
-MapRendererJSON::GetStopPoints
-(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops){
-    std::map<std::string_view, svg::Point> result;
+
+void MapRendererJSON::ComputeStopPoints
+(const std::vector<std::pair<std::string_view, geo::Coordinates>>& stops) {
     std::vector<geo::Coordinates> coordinates(stops.size());
     RenderSettings& settings = settings_.value();
 
@@ -136,11 +173,11 @@ MapRendererJSON::GetStopPoints
                                       settings.width, settings.height, settings.padding);
 
     std::for_each(stops.begin(), stops.end(),
-                   [&projector, &result](const std::pair<const std::string_view, geo::Coordinates>& stop){
-                        result[stop.first] = projector(stop.second);
+                   [&projector, this](const std::pair<const std::string_view, geo::Coordinates>& stop){
+                        stops_points_[stop.first] = projector(stop.second);
                    });
 
-    return result;
+    have_stop_points_ = true;
 }
 
 void MapRendererJSON::RenderStops() {
@@ -215,6 +252,7 @@ void MapRendererJSON::RenderBuses(const std::set<domain::BusForRender>& buses) {
     int current_color_index = 0;
     const std::vector<svg::Color>& palette = settings_.value().color_palette;
     const int colors_count = palette.size();
+    assert(colors_count != 0);
 
     std::vector<svg::Text> bus_labels;
     svg::Text underlayer;

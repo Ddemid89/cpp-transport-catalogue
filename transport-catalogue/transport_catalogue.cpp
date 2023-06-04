@@ -11,6 +11,16 @@
 #include <unordered_set>
 #include <set>
 
+TransportCatalogue::TransportCatalogue(TransportCatalogue&& other) {
+    std::swap(stops_, other.stops_);
+    std::swap(buses_, other.buses_);
+    std::swap(stops_refs_, other.stops_refs_);
+    std::swap(buses_refs_, other.buses_refs_);
+    std::swap(stops_to_buses_, other.stops_to_buses_);
+    std::swap(lengths_data_, other.lengths_data_);
+    std::swap(neighbours_distance_, other.neighbours_distance_);
+}
+
 void TransportCatalogue::AddStop(const domain::StopRequest& request) {
     domain::Stop& stop = GetStopRef(request.name);
     stop.coordinates = request.coordinates;
@@ -167,7 +177,6 @@ std::set<domain::BusForRender> TransportCatalogue::GetBusesForRender() const {
     return result;
 }
 
-
 std::vector<std::pair<std::string_view, geo::Coordinates>> TransportCatalogue::GetStopsUsed() const {
     std::vector<std::pair<std::string_view, geo::Coordinates>> result;
     using elem_type = std::pair<const std::string_view, std::set<std::string_view>>;
@@ -177,4 +186,43 @@ std::vector<std::pair<std::string_view, geo::Coordinates>> TransportCatalogue::G
     }
 
     return result;
+}
+
+std::vector<const domain::Stop*> TransportCatalogue::GetAllStops() const {
+    std::vector<const domain::Stop*> result(stops_.size());
+    std::transform(stops_.begin(), stops_.end(), result.begin(),
+                        [](const domain::Stop& stop){
+                            return &stop;
+                        });
+    return result;
+}
+
+std::vector<const domain::Bus*> TransportCatalogue::GetAllBuses() const {
+    std::vector<const domain::Bus*> result(buses_.size());
+    std::transform(buses_.begin(), buses_.end(), result.begin(),
+                        [](const domain::Bus& bus){
+                            return &bus;
+                        });
+    return result;
+}
+
+std::vector<std::pair<std::pair<std::string_view, std::string_view>, int>>
+TransportCatalogue::GetDistances() const {
+    std::vector<std::pair<std::pair<std::string_view, std::string_view>, int>> result(neighbours_distance_.size());
+        std::transform(neighbours_distance_.begin(), neighbours_distance_.end(), result.begin(),
+                       [](auto& stops){
+                            const domain::Stop* from = stops.first.first;
+                            const domain::Stop* to = stops.first.second;
+                            int distance = stops.second;
+                            std::pair<std::string_view, std::string_view> names{from->name, to->name};
+                            return std::make_pair(names, distance);
+                       });
+    return result;
+}
+
+
+void TransportCatalogue::AddDistance(std::string_view from, std::string_view to, int distance){
+    domain::Stop* from_ptr = &GetStopRef(from);
+    domain::Stop* to_ptr = &GetStopRef(to);
+    neighbours_distance_[{from_ptr, to_ptr}] = distance;
 }
